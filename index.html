@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <style>
+        * { margin: 0; padding: 0; }
+        canvas { touch-action: none; }
+        #score {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 24px;
+            font-family: Arial;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="score">得分: 0</div>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        let score = 0;
+        let canCreateNewBall = true; // 新增状态控制变量
+
+        // 屏幕适配
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        class Ball {
+            constructor(sizeLevel = 1) {
+                this.sizeLevel = sizeLevel;
+                this.baseSize = Math.min(canvas.width, canvas.height) * 0.05;
+                this.radius = this.baseSize * (1 + sizeLevel * 0.2);
+                this.x = canvas.width / 2;
+                this.y = canvas.height - this.radius - 10;
+                this.speedY = 0;
+                this.isMoving = false;
+                this.mass = 1000 / (this.radius * this.radius); // 质量与半径平方成反比
+                this.mergeScale = 1; // 合并动画比例（0-1）
+            }
+
+            update() {
+                if (this.isMoving) {
+                    this.speedY -= 0.5;
+                    this.y += this.speedY;
+                    
+                    if (this.y < this.radius) {
+                        this.y = this.radius;
+                        this.isMoving = false;
+                    }
+                } else if (this !== currentBall) {
+                    // 浮力系统增加防碰撞检测
+                    const originalY = this.y;
+                    const buoyancy = (1 - (this.mass / 1000)) * 0.8;
+                    this.y = Math.max(this.radius, this.y - buoyancy);
+                    
+                    // 浮力调整后立即检测碰撞
+                    for (const other of balls) {
+                        if (other !== this && other !== currentBall) {
+                            const dx = other.x - this.x;
+                            const dy = other.y - this.y;
+                            const distance = Math.sqrt(dx*dx + dy*dy);
+                            if (distance < this.radius + other.radius + 2) {
+                                this.y = originalY; // 撤销浮力调整
+                                break;
+                            }
+                        }
+                    }
+                }
+                // 在每次更新后执行多次约束
+                for (let i = 0; i < 3; i++) { // 三重约束迭代
+                    this.constrainPosition();
+                }
+            }
+
+            draw() {
+                ctx.beginPath();
+                const animRadius = this.radius * (this.mergeScale * 0.5 + 0.5); // 缩放动画
+                ctx.arc(this.x, this.y, animRadius, 0, Math.PI * 2);
+                ctx.fillStyle = `hsl(${this.sizeLevel * 30}, 70%, 60%)`;
+                ctx.fill();
+                ctx.strokeStyle = 'white';
+                ctx.stroke();
+            }
+
+            constrainPosition() {
+                // X轴边界
+                this.x = Math.max(this.radius, 
+                    Math.min(canvas.width - this.radius, this.x));
+                
+                // Y轴边界
+                this.y = Math.max(this.radius,
+                    Math.min(canvas.height - this.radius, this.y));
+
+                // 增强型动态约束
+                balls.forEach(other => {
+                    if (other === this) return;
+                    
+                    const dx = other.x - this.x;
+                    const dy = other.y - this.y;
+                    const distance = Math.hypot(dx, dy);
+                    const minDist = this.radius + other.radius + 2; // 保持2px安全距离
+
+                    if (distance < minDist) {
+                        const overlap = minDist - distance;
+                        const adjust = overlap * 1.5; // 增加调整力度
+                        const nx = dx / distance;
+                        const ny = dy / distance;
+
+                        // 双向调整确保分离
+                        this.x -= nx * adjust * 0.5;
+                        this.y -= ny * adjust * 0.5;
+                        other.x += nx * adjust * 0.5;
+                        other.y += ny * adjust * 0.5;
+
+                        // 立即重新计算边界
+                        this.x = Math.max(this.radius, Math.min(canvas.width - this.radius, this.x));
+                        this.y = Math.max(this.radius, Math.min(canvas.height - this.radius, this.y));
+                        other.x = Math.max(other.radius, Math.min(canvas.width - other.radius, other.x));
+                        other.y = Math.max(other.radius, Math.min(canvas.height - other.radius, other.y));
+                    }
+                });
+            }
+        }
+
+        let currentBall = new Ball();
+        let balls = [];
+        let touchStartX = 0;
+        let isTouching = false;
+
+        // 触摸事件
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (!currentBall || currentBall.isMoving) return; // 新增空值检查
+            isTouching = true;
+            currentBall.x = e.touches[0].clientX;
+            currentBall.constrainPosition();
+        });
+
+        canvas.addEventListener('touchmove', (e) => {
+            if (!isTouching || currentBall.isMoving) return; // 禁止拖动移动中的气球
+            currentBall.x = e.touches[0].clientX;
+            currentBall.constrainPosition();
+        });
+
+        // 鼠标事件
+        canvas.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            if (!currentBall || currentBall.isMoving) return; // 新增空值检查
+            isTouching = true;
+            currentBall.x = e.clientX;
+            currentBall.constrainPosition();
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (!isTouching || currentBall.isMoving) return; // 禁止拖动移动中的气球
+            currentBall.x = e.clientX;
+            currentBall.constrainPosition();
+        });
+
+        canvas.addEventListener('touchend', () => {
+            if (!isTouching || !canCreateNewBall) return;
+            isTouching = false;
+            currentBall.isMoving = true;
+            balls.push(currentBall);
+            setTimeout(() => {
+                createNewBall();
+            }, 500);
+            canCreateNewBall = false;
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            if (!isTouching || !canCreateNewBall) return;
+            isTouching = false;
+            currentBall.isMoving = true;
+            balls.push(currentBall);
+            setTimeout(() => {
+                createNewBall();
+            }, 500);
+            canCreateNewBall = false;
+        });
+
+        // 高斯随机数生成函数
+        function gaussianRandom(mean = 0, stdev = 1) {
+            let u = 1 - Math.random(); // 避免0值
+            let v = Math.random();
+            let z = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+            return z * stdev + mean;
+        }
+
+        function createNewBall() {
+            // 生成新气球时重新创建实例
+            let level;
+            do {
+                level = Math.round(gaussianRandom(3, 1));
+            } while (level < 1 || level > 5);
+            
+            currentBall = new Ball(level); // 创建全新实例
+            currentBall.x = canvas.width / 2;
+            currentBall.y = canvas.height - currentBall.radius - 10;
+            currentBall.isMoving = false;
+            canCreateNewBall = true;
+        }
+
+        function checkCollision() {
+            const MAX_ITERATIONS = 5; // 增加迭代次数
+            for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
+                const collisions = [];
+                
+                // 物理碰撞处理优先
+                // 使用空间网格优化检测
+                const spatialGrid = new Map();
+                balls.forEach(ball => {
+                    const gridX = Math.floor(ball.x / 150);
+                    const gridY = Math.floor(ball.y / 150);
+                    const key = `${gridX},${gridY}`;
+                    if (!spatialGrid.has(key)) spatialGrid.set(key, []);
+                    spatialGrid.get(key).push(ball);
+                });
+
+                // 阶段1：检测所有碰撞对（优化版）
+                spatialGrid.forEach((gridBalls, key) => {
+                    const [gx, gy] = key.split(',').map(Number);
+                    // 检测当前网格和相邻8个网格
+                    for (let dx = -1; dx <= 1; dx++) {
+                        for (let dy = -1; dy <= 1; dy++) {
+                            const neighborKey = `${gx+dx},${gy+dy}`;
+                            if (spatialGrid.has(neighborKey)) {
+                                gridBalls.forEach(b1 => {
+                                    spatialGrid.get(neighborKey).forEach(b2 => {
+                                        if (b1 === b2) return;
+                                        const dx = b2.x - b1.x;
+                                        const dy = b2.y - b1.y;
+                                        const distSq = dx*dx + dy*dy;
+                                        const minDist = b1.radius + b2.radius + 2; // 增加2px安全距离
+                                        const minDistSq = minDist * minDist;
+
+                                        if (distSq < minDistSq) {
+                                            const distance = Math.sqrt(distSq);
+                                            const overlap = (minDist - distance) * 1.2; // 增加过冲到20%
+                                            collisions.push({
+                                                b1, b2,
+                                                nx: dx/distance,
+                                                ny: dy/distance,
+                                                overlap
+                                            });
+                                        }
+                                    });
+                                });
+                            }
+                        }
+                    }
+                });
+
+                collisions.forEach(({b1, b2, nx, ny, overlap}) => {
+                    // 使用动量守恒的强力调整
+                    const totalMass = b1.mass + b2.mass;
+                    const ratio1 = b2.mass / totalMass;
+                    const ratio2 = b1.mass / totalMass;
+
+                    b1.x -= nx * overlap * ratio1 * 2.5; // 增加调整系数
+                    b1.y -= ny * overlap * ratio1 * 2.5;
+                    b2.x += nx * overlap * ratio2 * 2.5;
+                    b2.y += ny * overlap * ratio2 * 2.5;
+
+                    // 立即应用边界约束
+                    b1.constrainPosition();
+                    b2.constrainPosition();
+                });
+            }
+
+            // 后处理合并逻辑（增强版）
+            for (let i = balls.length - 1; i >= 0; i--) {
+                for (let j = balls.length - 1; j > i; j--) {
+                    const b1 = balls[i];
+                    const b2 = balls[j];
+                    const dx = b1.x - b2.x;
+                    const dy = b1.y - b2.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    
+                    // 合并阈值优化（考虑安全距离）
+                    const baseThreshold = b1.radius + b2.radius + 2; // 包含安全距离
+                    const mergeThreshold = baseThreshold * 1.02; // 102%的阈值
+
+                    if (distance < mergeThreshold && b1.sizeLevel === b2.sizeLevel) {
+                        // 合并气球
+                        const newLevel = b1.sizeLevel + 1;
+                        const newBall = new Ball(newLevel);
+                        newBall.x = (b1.x + b2.x) / 2;
+                        newBall.y = (b1.y + b2.y) / 2;
+                        newBall.isMoving = true;
+                        
+                        // 添加合并动画效果
+                        newBall.mergeScale = 0;
+                        animateMerge(newBall);
+                        
+                        balls.splice(j, 1);
+                        balls.splice(i, 1);
+                        balls.push(newBall);
+                        
+                        score += newLevel * 10;
+                        document.getElementById('score').textContent = `得分: ${score}`;
+                        return;
+                    }
+                }
+            }
+        }
+
+        // 新增合并动画
+        function animateMerge(ball) {
+            const duration = 300; // 动画时长300ms
+            const start = Date.now();
+            
+            function update() {
+                const elapsed = Date.now() - start;
+                if (elapsed < duration) {
+                    ball.mergeScale = elapsed / duration;
+                    requestAnimationFrame(update);
+                } else {
+                    ball.mergeScale = 1;
+                }
+            }
+            requestAnimationFrame(update);
+        }
+
+        function gameLoop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // 更新所有球体
+            currentBall.update();
+            
+            // 按半径从大到小排序（大的后绘制在顶层）
+            const sortedBalls = [...balls].sort((a, b) => a.radius - b.radius);
+            
+            sortedBalls.forEach(ball => {
+                ball.update();
+                ball.draw();
+            });
+
+            // 当前球体始终在最上层
+            currentBall.draw();
+
+            checkCollision(); // 单次调用包含内部迭代
+            
+            // 最终位置验证
+            balls.forEach(ball => {
+                ball.x = Math.max(ball.radius, Math.min(canvas.width - ball.radius, ball.x));
+                ball.y = Math.max(ball.radius, Math.min(canvas.height - ball.radius, ball.y));
+            });
+            
+            requestAnimationFrame(gameLoop);
+        }
+
+        // 在checkCollision函数前添加
+        const GRID_SIZE = 150; // 根据气球最大尺寸调整
+
+        function getGridKey(x, y) {
+            return `${Math.floor(x/GRID_SIZE)},${Math.floor(y/GRID_SIZE)}`;
+        }
+
+        // 在物理检测前添加空间划分
+        const spatialGrid = new Map();
+        balls.forEach((ball, index) => {
+            const key = getGridKey(ball.x, ball.y);
+            if (!spatialGrid.has(key)) spatialGrid.set(key, []);
+            spatialGrid.get(key).push(index);
+        });
+
+        gameLoop();
+    </script>
+</body>
+</html> 
