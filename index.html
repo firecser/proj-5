@@ -398,10 +398,10 @@
             // 游戏失败检测（包含所有已发射气球）
             const activeBalls = balls.filter(b => b !== currentBall);
             
-            // 检查是否有气球底部低于红线
+            // 检查是否有气球完全低于红线（顶部超过红线）
             const anyBelow = activeBalls.some(ball => {
-                const bottomY = ball.y + ball.radius;
-                return bottomY > warningLineY;
+                const topY = ball.y - ball.radius;
+                return topY > warningLineY; // 顶部超过红线即完全越界
             });
             
             // 持续1秒检测
