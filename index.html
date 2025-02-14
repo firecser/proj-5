@@ -19,31 +19,32 @@
 <body>
     <canvas id="gameCanvas"></canvas>
     <div id="score">得分: 0</div>
+    <div id="gameOver" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.8); color: white; padding: 20px; text-align: center; border-radius: 10px;">
+        <h2>游戏结束！</h2>
+        <p>最终得分: <span id="finalScore">0</span></p>
+        <button onclick="restartGame()" style="padding: 10px 20px; margin-top: 10px;">重新开始</button>
+    </div>
     <script>
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         let score = 0;
-        let canCreateNewBall = true; // 新增状态控制变量
+        let canCreateNewBall = true;
+        let isGameOver = false;
+        let warningLineY = 0;
+        let currentBall;
 
-        // 屏幕适配
-        function resize() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-        }
-        window.addEventListener('resize', resize);
-        resize();
-
+        // 将Ball类定义移到最前面
         class Ball {
-            constructor(sizeLevel = 1) {
+            constructor(sizeLevel = 5) {
                 this.sizeLevel = sizeLevel;
-                this.baseSize = Math.min(canvas.width, canvas.height) * 0.05;
+                this.baseSize = Math.min(canvas.width, canvas.height) * 0.08;
                 this.radius = this.baseSize * (1 + sizeLevel * 0.2);
                 this.x = canvas.width / 2;
-                this.y = canvas.height - this.radius - 10;
+                this.y = canvas.height - this.radius - 20;
                 this.speedY = 0;
                 this.isMoving = false;
-                this.mass = 1000 / (this.radius * this.radius); // 质量与半径平方成反比
-                this.mergeScale = 1; // 合并动画比例（0-1）
+                this.mass = 1000 / (this.radius * this.radius);
+                this.mergeScale = 1;
             }
 
             update() {
@@ -130,7 +131,27 @@
             }
         }
 
-        let currentBall = new Ball();
+        // 屏幕适配（调整到类定义之后）
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            
+            // 直接使用屏幕高度比例设置红线
+            warningLineY = canvas.height * 0.7; // 70%屏幕高度
+            
+            // 重新定位当前气球
+            if (currentBall) {
+                currentBall.radius = Math.min(canvas.width, canvas.height) * 0.08 * (1 + currentBall.sizeLevel * 0.2);
+                currentBall.y = canvas.height - currentBall.radius - 20;
+                currentBall.x = canvas.width / 2;
+            }
+        }
+        window.addEventListener('resize', resize);
+        // 延迟初始调用
+        setTimeout(resize, 0);
+
+        // 初始化当前气球（在类定义后）
+        currentBall = new Ball();
         let balls = [];
         let touchStartX = 0;
         let isTouching = false;
@@ -196,16 +217,13 @@
         }
 
         function createNewBall() {
-            // 生成新气球时重新创建实例
             let level;
             do {
-                level = Math.round(gaussianRandom(3, 1));
-            } while (level < 1 || level > 5);
+                level = Math.round(gaussianRandom(4, 1));
+            } while (level < 2 || level > 6);
             
-            currentBall = new Ball(level); // 创建全新实例
-            currentBall.x = canvas.width / 2;
-            currentBall.y = canvas.height - currentBall.radius - 10;
-            currentBall.isMoving = false;
+            currentBall = new Ball(level);
+            currentBall.y = canvas.height - currentBall.radius - 20;
             canCreateNewBall = true;
         }
 
@@ -293,8 +311,13 @@
                         // 合并气球
                         const newLevel = b1.sizeLevel + 1;
                         const newBall = new Ball(newLevel);
-                        newBall.x = (b1.x + b2.x) / 2;
-                        newBall.y = (b1.y + b2.y) / 2;
+                        // X轴保持质量加权平均：保持物理准确性，延续原逻辑
+                        newBall.x = (b1.x * b1.mass + b2.x * b2.mass) / (b1.mass + b2.mass);
+                        // Y轴优化为质量加权平均 + 安全偏移：
+                        // 1. 比单纯取最小值更符合物理规律（考虑不同质量气球的位置权重）
+                        // 2. 0.8系数提供更大的安全距离，避免新生气球与下方物体碰撞
+                        // 3. 配合浮力系统使新气球更自然上升
+                        newBall.y = (b1.y + b2.y) / 2 - newBall.radius * 0.5;
                         newBall.isMoving = true;
                         
                         // 添加合并动画效果
@@ -307,7 +330,6 @@
                         
                         score += newLevel * 10;
                         document.getElementById('score').textContent = `得分: ${score}`;
-                        return;
                     }
                 }
             }
@@ -330,7 +352,52 @@
             requestAnimationFrame(update);
         }
 
+        function drawWarningLine() {
+            ctx.beginPath();
+            ctx.moveTo(0, warningLineY);
+            ctx.lineTo(canvas.width, warningLineY);
+            ctx.strokeStyle = 'red';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.fillStyle = 'red';
+            ctx.font = '20px Arial';
+            ctx.fillText('警告线', 10, warningLineY - 5);
+        }
+
+        function checkGameOver() {
+            if (isGameOver) return;
+            
+            const activeBalls = balls.filter(b => b !== currentBall);
+            if (activeBalls.length === 0) return;
+            
+            const allBelow = activeBalls.every(ball => {
+                const bottomY = ball.y + ball.radius;
+                return bottomY > warningLineY - 10; // 正确方向缓冲
+            });
+            
+            if (allBelow) {
+                isGameOver = true;
+                document.getElementById('gameOver').style.display = 'block';
+                document.getElementById('finalScore').textContent = score;
+            }
+        }
+
+        function restartGame() {
+            balls = [];
+            score = 0;
+            isGameOver = false;
+            canCreateNewBall = true;
+            isTouching = false;
+            currentBall = new Ball();
+            document.getElementById('gameOver').style.display = 'none';
+            document.getElementById('score').textContent = '得分: 0';
+            // 强制重绘界面
+            resize();
+        }
+
         function gameLoop() {
+            if (isGameOver) return;
+            
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             
             // 更新所有球体
@@ -355,6 +422,9 @@
                 ball.y = Math.max(ball.radius, Math.min(canvas.height - ball.radius, ball.y));
             });
             
+            drawWarningLine();
+            checkGameOver();
+            
             requestAnimationFrame(gameLoop);
         }
 
@@ -374,6 +444,9 @@
         });
 
         gameLoop();
+
+        console.log(`Lv.${currentBall.sizeLevel} 半径: ${currentBall.radius.toFixed(1)}px`);
+        console.log(`当前红线位置: ${warningLineY}px (${(warningLineY/canvas.height*100).toFixed(1)}%高度)`);
     </script>
 </body>
 </html> 
