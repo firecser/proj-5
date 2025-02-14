@@ -24,6 +24,10 @@
         <p>最终得分: <span id="finalScore">0</span></p>
         <button onclick="restartGame()" style="padding: 10px 20px; margin-top: 10px;">重新开始</button>
     </div>
+    <div id="loading" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.8); color: white; padding: 20px; text-align: center; border-radius: 10px;">
+        <h2>游戏加载中...</h2>
+        <p>请稍候...</p>
+    </div>
     <script>
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
@@ -35,6 +39,9 @@
         let currentBall;
         let failureTimer = null;
         let spatialGrid;
+        let ballImages = [];
+        let loadedCount = 0;
+        const totalImages = 13;
 
         // 将Ball类定义移到最前面
         class Ball {
@@ -92,17 +99,33 @@
 
             draw() {
                 const level = Math.min(this.sizeLevel, 13);
-                const img = new Image();
-                img.src = `assets/images/ball-${level}.png`; // 直接使用PNG格式
-                
-                if (img.complete) {
-                    this.drawImage(img);
+                if (!ballImages[level]) {
+                    // 初始化图片加载
+                    ballImages[level] = new Image();
+                    ballImages[level].src = `assets/images/ball-${level}.png`;
+                    ballImages[level].onload = () => {
+                        // 全局标记图片就绪
+                        ballImages[level].isReady = true;
+                        requestAnimationFrame(() => this.draw());
+                    };
+                    ballImages[level].onerror = () => {
+                        console.error(`图片加载失败: ball-${level}.png`);
+                    };
+                }
+
+                if (ballImages[level].complete && ballImages[level].isReady) {
+                    this.drawImage(ballImages[level]);
                 } else {
-                    img.onload = () => this.drawImage(img);
+                    // 显示加载中的占位图形
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
+                    ctx.fillStyle = `hsl(${this.sizeLevel * 30}, 70%, 60%)`;
+                    ctx.fill();
                 }
             }
 
             drawImage(img) {
+                console.assert(img.complete, '图片未加载完成时绘制');
                 ctx.beginPath();
                 const scale = (this.radius * 2) / img.naturalWidth;
                 const drawSize = img.naturalWidth * scale * this.mergeScale;
@@ -353,12 +376,24 @@
                         newBall.mergeScale = 0;
                         animateMerge(newBall);
                         
-                        balls.splice(j, 1);
+                        // 修正删除顺序：先删除j后删除i
+                        const removed = balls.splice(j, 1);
                         balls.splice(i, 1);
+                        
+                        // 确保新气球位置有效
+                        newBall.x = Math.max(newBall.radius, Math.min(canvas.width - newBall.radius, newBall.x));
+                        newBall.y = Math.max(newBall.radius, Math.min(canvas.height - newBall.radius, newBall.y));
+                        
                         balls.push(newBall);
                         
                         score += newLevel * 10;
                         document.getElementById('score').textContent = `得分: ${score}`;
+                        
+                        // 重置循环索引避免跳过元素
+                        i = balls.length - 1;
+                        j = balls.length - 1;
+
+                        console.log(`合并 ${b1.sizeLevel}+${b2.sizeLevel} → ${newLevel} 位置:(${newBall.x},${newBall.y})`);
                     }
                 }
             }
@@ -510,6 +545,22 @@
         });
 
         function initGame() {
+            // 预加载所有级别图片
+            for (let i = 1; i <= totalImages; i++) {
+                const img = new Image();
+                img.isReady = false; // 新增状态标记
+                img.onload = () => {
+                    loadedCount++;
+                    img.isReady = true;
+                    console.log(`已加载 ${loadedCount}/${totalImages}`);
+                    if(loadedCount === totalImages) {
+                        document.getElementById('loading').style.display = 'none';
+                    }
+                };
+                img.src = `assets/images/ball-${i}.png`;
+                ballImages[i] = img;
+            }
+            
             spatialGrid = new Map();
             resize();
             gameLoop();
