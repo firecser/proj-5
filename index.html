@@ -440,11 +440,16 @@
             document.getElementById('score').textContent = '得分: 0';
             clearTimeout(failureTimer);
             failureTimer = null;
+            spatialGrid = new Map();  // 重置空间网格
+            ctx.clearRect(0, 0, canvas.width, canvas.height);  // 强制清空画布
+            if (!isGameOver && !isGameSuccess) {  // 确保循环重启
+                gameLoop();
+            }
             resize();
         }
 
         function gameLoop() {
-            if (isGameOver || isGameSuccess) return;
+            console.assert(!isGameOver, '游戏循环应在非结束状态运行');
             
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             
