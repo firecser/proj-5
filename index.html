@@ -91,15 +91,28 @@
             }
 
             draw() {
+                const level = Math.min(this.sizeLevel, 13);
+                const img = new Image();
+                img.src = `assets/images/ball-${level}.png`; // 直接使用PNG格式
+                
+                if (img.complete) {
+                    this.drawImage(img);
+                } else {
+                    img.onload = () => this.drawImage(img);
+                }
+            }
+
+            drawImage(img) {
                 ctx.beginPath();
-                const animRadius = this.radius * (this.mergeScale * 0.5 + 0.5); // 缩放动画
-                ctx.arc(this.x, this.y, animRadius, 0, Math.PI * 2);
-                ctx.fillStyle = `hsl(${this.sizeLevel * 30}, 70%, 60%)`;
-                ctx.fill();
-                ctx.setLineDash([]);
-                ctx.strokeStyle = 'rgba(255,255,255,0.8)';
-                ctx.lineWidth = 2;
-                ctx.stroke();
+                const scale = (this.radius * 2) / img.naturalWidth;
+                const drawSize = img.naturalWidth * scale * this.mergeScale;
+                ctx.drawImage(
+                    img,
+                    this.x - drawSize/2,
+                    this.y - drawSize/2,
+                    drawSize,
+                    drawSize
+                );
             }
 
             constrainPosition() {
