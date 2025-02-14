@@ -398,14 +398,14 @@
             // 游戏失败检测（包含所有已发射气球）
             const activeBalls = balls.filter(b => b !== currentBall);
             
-            // 检查每个气球的顶部是否超过红线
-            const anyAbove = activeBalls.some(ball => {
-                const topY = ball.y - ball.radius;
-                return topY < warningLineY;
+            // 检查是否有气球底部低于红线
+            const anyBelow = activeBalls.some(ball => {
+                const bottomY = ball.y + ball.radius;
+                return bottomY > warningLineY;
             });
             
             // 持续1秒检测
-            if (!anyAbove && activeBalls.length > 0) {
+            if (anyBelow && activeBalls.length > 0) {
                 if (!failureTimer) {
                     failureTimer = setTimeout(() => {
                         isGameOver = true;
