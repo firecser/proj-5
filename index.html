@@ -96,7 +96,9 @@
                 ctx.arc(this.x, this.y, animRadius, 0, Math.PI * 2);
                 ctx.fillStyle = `hsl(${this.sizeLevel * 30}, 70%, 60%)`;
                 ctx.fill();
-                ctx.strokeStyle = 'white';
+                ctx.setLineDash([]);
+                ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+                ctx.lineWidth = 2;
                 ctx.stroke();
             }
 
@@ -373,14 +375,13 @@
             ctx.strokeStyle = 'red';
             ctx.lineWidth = 2;
             ctx.stroke();
+            
             ctx.fillStyle = 'red';
             ctx.font = '20px Arial';
             ctx.fillText('警告线', 10, warningLineY - 5);
-            ctx.strokeStyle = 'rgba(255,0,0,0.3)';
-            ctx.setLineDash([5, 5]);
-            ctx.moveTo(0, warningLineY - 10);
-            ctx.lineTo(canvas.width, warningLineY - 10);
-            ctx.stroke();
+            
+            // 重置虚线设置
+            ctx.setLineDash([]);
         }
 
         function checkGameOver() {
