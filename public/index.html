@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="icon" href="data:,">
+    <style>
+        * { margin: 0; padding: 0; }
+        canvas { touch-action: none; border: 2px solid red; }
+        body {
+            background: linear-gradient(45deg, #1a1a1a 0%, #0a0a2a 100%);
+            overflow: hidden;
+        }
+        #score {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            color: #FFD700;
+            font-size: 5vmin; /* 根据视口较小尺寸的5% */
+            font-family: 'Bangers', cursive;
+            letter-spacing: 2px;
+            text-shadow: 0 0 10px #FF4500, 2px 2px 4px rgba(0,0,0,0.7);
+            padding: 2vmax;  /* 根据视口较大尺寸的2% */
+        }
+        #gameOver {
+            background: radial-gradient(circle, rgba(255,69,0,0.9) 0%, rgba(178,34,34,0.9) 100%);
+            border: 3px solid #FFD700;
+            box-shadow: 0 0 30px #FF4500;
+        }
+        button {
+            padding: 15px 30px;
+            background: linear-gradient(45deg, #FF8C00 0%, #FF4500 100%);
+            border: 2px solid #FFD700;
+            border-radius: 25px;
+            color: #FFF;
+            font-family: 'Bangers', cursive;
+            font-size: 20px;
+            text-shadow: 0 0 10px rgba(255,215,0,0.5);
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        button:hover {
+            transform: scale(1.1);
+            box-shadow: 0 0 20px #FF4500;
+        }
+        #energyBar {
+            position: fixed;
+            top: 80px;
+            left: 20px;
+            width: 200px;
+            height: 20px;
+            background: rgba(0,0,0,0.5);
+            border-radius: 10px;
+            overflow: hidden;
+            border: 2px solid #FFD700;
+        }
+        #energyFill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #00BFFF 0%, #1E90FF 100%);
+            transition: width 0.5s ease;
+            box-shadow: 0 0 10px #00BFFF;
+        }
+        #loading {
+            background: rgba(0, 0, 0, 0.9);
+            border: 2px solid #FFD700;
+            border-radius: 15px;
+            padding: 30px 50px;
+            box-shadow: 0 0 30px rgba(255, 215, 0, 0.5);
+        }
+        #loading p {
+            margin-top: 15px;
+            font-size: 18px;
+            color: #00BFFF;
+            text-shadow: 0 0 10px rgba(0, 191, 255, 0.5);
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        #loading h2 {
+            animation: pulse 1.5s infinite;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="score">得分: 0</div>
+    <div id="gameOver" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.8); color: white; padding: 20px; text-align: center; border-radius: 10px;">
+        <h2>游戏结束！</h2>
+        <p>最终得分: <span id="finalScore">0</span></p>
+        <button onclick="restartGame()" style="padding: 10px 20px; margin-top: 10px;">重新开始</button>
+    </div>
+    <div id="loading" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.8); color: white; padding: 20px; text-align: center; border-radius: 10px;">
+        <h2>游戏加载中...</h2>
+        <p>请稍候...</p>
+    </div>
+    <div id="energyBar">
+        <div id="energyFill"></div>
+    </div>
+    <script type="module">
+
+    // 在导入前动态设置MIME类型
+    const setMime = () => {
+        const oldCreateElement = document.createElement;
+        document.createElement = (tagName, options) => {
+            const el = oldCreateElement.call(document, tagName, options);
+            if (tagName === 'script' && el.type === 'module') {
+                el.setAttribute('data-mime', 'application/javascript');
+            }
+            return el;
+        };
+    };
+    setMime();
+
+    // 然后进行导入
+    import { CONFIG } from '/src/config.js';
+    console.log('当前配置:', CONFIG);
+    import { Ball } from './src/core/Ball.js';
+    import { PhysicsSystem } from './src/core/Physics.js';
+    import { MergeSystem } from './src/core/Merge.js';
+    import { EnergyBar } from './src/ui/EnergyBar.js';
+    import { ScoreSystem } from './src/ui/Score.js';
+
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    let score = 0;
+    let canCreateNewBall = true;
+    let isGameSuccess = false;
+    let isGameOver = false;
+    let warningLineY = 0;
+    let currentBall = new Ball(canvas);
+    let failureTimer = null;
+    let spatialGrid;
+    let ballImages = [];
+    let loadedCount = 0;
+    const totalImages = 13;
+
+    let physics = new PhysicsSystem(canvas);
+    const energyBar = new EnergyBar();
+    const scoreSystem = new ScoreSystem();
+
+    let balls = [];
+    let touchStartX = 0;
+    let isTouching = false;
+
+    // 添加全局动画帧ID
+    let animationFrameId = null;
+
+    function initGame() {
+        document.getElementById('loading').style.display = 'block';
+        // 预加载所有级别图片
+        for (let i = 1; i <= totalImages; i++) {
+            const img = new Image();
+            img.timeout = 5000; // 5秒超时
+            img.ontimeout = () => {
+                console.error(`图片加载超时: ball-${i}.png`);
+                document.getElementById('loading').querySelector('p').textContent = 
+                    `图片加载超时: ball-${i}.png 请检查网络连接`;
+            };
+            img.onload = () => {
+                loadedCount++;
+                // 更新加载进度文本
+                document.getElementById('loading').querySelector('p').textContent = 
+                    `已加载 ${loadedCount}/${totalImages} (${Math.round(loadedCount/totalImages*100)}%)`;
+                if(loadedCount === totalImages) {
+                    document.getElementById('loading').style.display = 'none';
+                }
+            };
+            img.onerror = () => {
+                console.error(`资源加载失败: ball-${i}.png`);
+                document.getElementById('loading').querySelector('p').textContent = 
+                    `图片加载失败: ball-${i}.png 请检查assets/images目录`;
+            };
+            img.src = `/assets/images/ball-${i}.png`.replace(/\\/g, '/');
+            ballImages[i] = img;
+        }
+        
+        spatialGrid = new Map();
+        resize();
+        gameLoop();
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+        });
+
+        canvas.addEventListener('touchmove', handleTouchMove);
+        canvas.addEventListener('mousemove', handleMouseMove);
+
+        console.log('初始化画布尺寸:', canvas.width, canvas.height);
+        console.log('当前气球初始位置:', currentBall.x, currentBall.y);
+    }
+
+    function gameLoop() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // 先绘制所有已发射气球
+        balls.forEach(ball => ball.draw(ctx));
+        
+        // 最后绘制当前待机气球（确保在最上层）
+        currentBall.draw(ctx);
+        
+        drawWarningLine();
+        requestAnimationFrame(gameLoop);
+    }
+
+    window.onload = initGame;
+
+    console.log(`Lv.${currentBall.sizeLevel} 半径: ${currentBall.radius.toFixed(1)}px`);
+    console.log(`当前红线位置: ${warningLineY}px (${(warningLineY/canvas.height*100).toFixed(1)}%高度)`);
+    console.log(`当前最高等级: ${Math.max(...balls.map(b => b.sizeLevel)) || 0}`);
+    console.log(`失败倒计时: ${failureTimer ? '进行中' : '未触发'}`);
+    console.log('游戏初始化完成于：' + new Date().toLocaleTimeString());
+
+    // 新增能量条更新逻辑
+    function updateEnergyBar() {
+        const maxLevel = Math.max(...balls.map(b => b.sizeLevel), 0);
+        energyBar.update(maxLevel);
+    }
+
+    // 添加龙珠风格字体
+    const style = document.createElement('style');
+    style.textContent = `@import url('https://fonts.googleapis.com/css2?family=Bangers&display=swap');`;
+    document.head.appendChild(style);
+
+    // 气球生成规则
+    const INITIAL_LEVEL = 5;      // 初始气球等级
+    const MIN_LEVEL = 2;          // 最小生成等级
+    const MAX_LEVEL = 6;           // 最大生成等级
+    const MERGE_THRESHOLD = 1.02;  // 合并触发阈值（半径和的102%）
+
+    function operationFlow() {
+        // 1. 拖动底部待机气球
+        // 2. 松开手指发射
+        // 3. 自动生成新待机气球
+        // 4. 重复操作直到游戏结束
+    }
+
+    const upgradeRules = {
+        mergeCondition: "相同等级气球接触",
+        upgradeEffect: "等级+1，半径增大20%",
+        scoreFormula: "新等级 x 10 分",
+        maxLevel: 13
+    };
+
+    const physicsParams = {
+        initialSpeed: 0,
+        gravityDecay: 0.2,      // 发射后的速度衰减
+        buoyancyCoefficient: 1.2,  // 静止气球的上升速度
+        collisionRestitution: 1.2, // 碰撞后的分离力度
+        safeDistance: 2         // 气球间最小间隔
+    };
+
+    function checkGameEnd() {
+        // 失败条件: 任一气球触顶（Y < 半径）
+        // 胜利条件: 合成最高等级气球（Lv.13）
+        // 红线预警: 70%屏幕高度触发倒计时
+    }
+
+    // 屏幕适配（调整到类定义之后）
+    function resize() {
+        const deviceRatio = window.devicePixelRatio || 1;
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        
+        // 设置画布逻辑尺寸
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+        
+        // 设置画布实际像素尺寸
+        canvas.width = Math.floor(width * deviceRatio);
+        canvas.height = Math.floor(height * deviceRatio);
+        
+        // 缩放绘图上下文
+        ctx.scale(deviceRatio, deviceRatio);
+        
+        // 更新游戏元素尺寸
+        warningLineY = height * CONFIG.WARNING_LINE;
+        if (currentBall) {
+            currentBall.resize(canvas);
+        }
+    }
+    window.addEventListener('resize', resize);
+    // 延迟初始调用
+    setTimeout(resize, 0);
+
+    // 触摸事件
+    canvas.addEventListener('touchstart', e => {
+        if (!currentBall || currentBall.isMoving) return;
+        currentBall.x = e.touches[0].clientX;
+        currentBall.constrainPosition();
+    });
+
+    canvas.addEventListener('touchend', () => {
+        if (!isTouching) return;
+        currentBall.isMoving = true;
+        currentBall.speedY = -15; // 与参考代码一致的初速度
+        balls.push(currentBall);
+        createNewBall();
+    });
+
+    // 鼠标事件
+    canvas.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        if (!currentBall || currentBall.isMoving) return; // 新增空值检查
+        isTouching = true;
+        currentBall.x = e.clientX;
+        currentBall.constrainPosition();
+    });
+
+    // 定义鼠标事件处理函数
+    const handleMouseMove = (e) => {
+        if (!isTouching || currentBall.isMoving) return;
+        const pos = getCanvasPosition(e.clientX, e.clientY);
+        currentBall.x = pos.x;
+        currentBall.constrainPosition();
+    };
+
+    canvas.addEventListener('mouseup', () => {
+        if (!isTouching || !canCreateNewBall) return;
+        isTouching = false;
+        currentBall.isMoving = true;
+        balls = balls.filter(b => b !== currentBall);
+        balls.push(currentBall);
+        setTimeout(() => {
+            createNewBall();
+        }, 500);
+        canCreateNewBall = false;
+    });
+
+    // 高斯随机数生成函数
+    function gaussianRandom(mean = 0, stdev = 1) {
+        let u = 1 - Math.random(); // 避免0值
+        let v = Math.random();
+        let z = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+        return z * stdev + mean;
+    }
+
+    function createNewBall(isIdle = true) {
+        const level = Math.floor(Math.random() * 13) + 1;
+        currentBall = new Ball(canvas, level);
+        currentBall.isIdle = isIdle; // 设置待机状态
+        currentBall.y = canvas.height - currentBall.radius - 20;
+        currentBall.lastBuoyancyTime = Date.now();
+        currentBall.isMoving = false;
+        currentBall.speedY = 0;
+        balls = balls.filter(b => b !== currentBall);
+        canCreateNewBall = true;
+
+        // 在createNewBall()中验证新气球属性
+        console.assert(
+            currentBall.isMoving === false,
+            "新气球应处于静止状态"
+        );
+        console.assert(
+            balls.includes(currentBall) === false,
+            "当前待机气球不应在balls数组中"
+        );
+
+        // 在createNewBall()中添加性能监控
+        const startMem = performance.memory.usedJSHeapSize;
+        // ...创建新气球逻辑...
+        console.log(`内存使用量: ${(performance.memory.usedJSHeapSize - startMem).toFixed(1)}KB`);
+
+        // 新增位置校验
+        currentBall.x = Math.max(currentBall.radius, 
+            Math.min(canvas.width - currentBall.radius, currentBall.x));
+        currentBall.y = canvas.height - currentBall.radius - 20;
+        
+        // 添加生成动画
+        currentBall.scale = 0;
+        const animate = () => {
+            currentBall.scale += (1 - currentBall.scale) * 0.1;
+            if (1 - currentBall.scale > 0.01) {
+                requestAnimationFrame(animate);
+            }
+        };
+        animate();
+    }
+
+    function checkCollision() {
+        spatialGrid = new Map();
+        const MAX_ITERATIONS = 8;
+        for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
+            const collisions = [];
+            
+            // 物理碰撞处理优先
+            balls.forEach(ball => {
+                const gridX = Math.floor(ball.x / 150);
+                const gridY = Math.floor(ball.y / 150);
+                const key = `${gridX},${gridY}`;
+                if (!spatialGrid.has(key)) spatialGrid.set(key, []);
+                spatialGrid.get(key).push(ball);
+            });
+
+            // 阶段1：检测所有碰撞对（优化版）
+            spatialGrid.forEach((gridBalls, key) => {
+                const [gx, gy] = key.split(',').map(Number);
+                for (let dx = -1; dx <= 1; dx++) {
+                    for (let dy = -1; dy <= 1; dy++) {
+                        const neighborKey = `${gx+dx},${gy+dy}`;
+                        if (spatialGrid.has(neighborKey)) {
+                            gridBalls.forEach(b1 => {
+                                spatialGrid.get(neighborKey).forEach(b2 => {
+                                    if (b1 === b2) return;
+                                    const dx = b2.x - b1.x;
+                                    const dy = b2.y - b1.y;
+                                    const distSq = dx*dx + dy*dy;
+                                    const minDist = b1.radius + b2.radius + 2;
+                                    const minDistSq = minDist * minDist;
+
+                                    if (distSq < minDistSq) {
+                                        const distance = Math.sqrt(distSq);
+                                        const overlap = (minDist - distance) * 1.2;
+                                        collisions.push({
+                                            b1, b2,
+                                            nx: dx/distance,
+                                            ny: dy/distance,
+                                            overlap
+                                        });
+                                        // 新增：碰撞时立即停止移动
+                                        if(b1.isMoving) b1.isMoving = false;
+                                        if(b2.isMoving) b2.isMoving = false;
+                                    }
+                                });
+                            });
+                        }
+                    }
+                }
+            });
+
+            collisions.forEach(({b1, b2, nx, ny, overlap}) => {
+                // 使用动量守恒的强力调整
+                const totalMass = b1.mass + b2.mass;
+                const ratio1 = b2.mass / totalMass;
+                const ratio2 = b1.mass / totalMass;
+
+                // 应用调整时添加速度衰减
+                b1.x -= nx * overlap * 0.8 * ratio1;
+                b1.y -= ny * overlap * 0.8 * ratio1;
+                b2.x += nx * overlap * 0.8 * ratio2;
+                b2.y += ny * overlap * 0.8 * ratio2;
+                
+                // 添加速度衰减
+                b1.speedY *= 0.6;
+                b2.speedY *= 0.6;
+
+                // 立即应用边界约束
+                b1.constrainPosition();
+                b2.constrainPosition();
+            });
+        }
+
+        // 后处理合并逻辑（增强版）
+        for (let i = balls.length - 1; i >= 0; i--) {
+            for (let j = balls.length - 1; j > i; j--) {
+                const b1 = balls[i];
+                const b2 = balls[j];
+                const dx = b1.x - b2.x;
+                const dy = b1.y - b2.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                // 合并阈值优化（考虑安全距离）
+                const baseThreshold = b1.radius + b2.radius + 2; // 包含安全距离
+                const mergeThreshold = baseThreshold * 1.02; // 102%的阈值
+
+                if (distance < mergeThreshold && b1.sizeLevel === b2.sizeLevel) {
+                    // 合并气球
+                    const newLevel = b1.sizeLevel + 1;
+                    const newBall = new Ball(canvas, newLevel);
+                    // X轴保持质量加权平均：保持物理准确性，延续原逻辑
+                    newBall.x = (b1.x * b1.mass + b2.x * b2.mass) / (b1.mass + b2.mass);
+                    // Y轴优化为质量加权平均 + 安全偏移：
+                    // 1. 比单纯取最小值更符合物理规律（考虑不同质量气球的位置权重）
+                    // 2. 0.8系数提供更大的安全距离，避免新生气球与下方物体碰撞
+                    // 3. 配合浮力系统使新气球更自然上升
+                    newBall.y = (b1.y + b2.y) / 2 - newBall.radius * 0.5;
+                    newBall.isMoving = true;
+                    
+                    // 添加合并动画效果
+                    newBall.mergeScale = 0;
+                    MergeSystem.animateMerge(ctx, newBall);
+                    
+                    // 修正删除顺序：先删除j后删除i
+                    const removed = balls.splice(j, 1);
+                    balls.splice(i, 1);
+                    
+                    // 确保新气球位置有效
+                    newBall.x = Math.max(newBall.radius, Math.min(canvas.width - newBall.radius, newBall.x));
+                    newBall.y = Math.max(newBall.radius, Math.min(canvas.height - newBall.radius, newBall.y));
+                    
+                    balls.push(newBall);
+                    
+                    score += newLevel * 10;
+                    scoreSystem.add(newLevel * 10);
+                    
+                    // 重置循环索引避免跳过元素
+                    i = balls.length - 1;
+                    j = balls.length - 1;
+
+                    console.log(`合并 ${b1.sizeLevel}+${b2.sizeLevel} → ${newLevel} 位置:(${newBall.x},${newBall.y})`);
+                }
+            }
+        }
+
+        // 检查是否存在13级气球
+        const activeBalls = balls.filter(b => b !== currentBall);
+        const hasMaxLevel = activeBalls.some(b => b.sizeLevel === 13);
+        if (hasMaxLevel) {
+            isGameSuccess = true;
+            showGameResult(true);
+        }
+    }
+
+    function drawWarningLine() {
+        ctx.save(); // 保存画布状态
+        ctx.beginPath();
+        ctx.moveTo(0, warningLineY);
+        ctx.lineTo(canvas.width, warningLineY);
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.restore(); // 恢复画布状态
+    }
+
+    function checkGameOver() {
+        if (isGameOver || isGameSuccess) return;
+        
+        // 游戏失败检测（包含所有已发射气球）
+        const activeBalls = balls.filter(b => b !== currentBall);
+        
+        // 检查是否有气球完全低于红线（顶部超过红线）
+        const anyBelow = activeBalls.some(ball => {
+            const topY = ball.y - ball.radius;
+            return topY > warningLineY; // 顶部超过红线即完全越界
+        });
+        
+        // 持续1秒检测
+        if (anyBelow && activeBalls.length > 0) {
+            if (!failureTimer) {
+                failureTimer = setTimeout(() => {
+                    isGameOver = true;
+                    showGameResult(false);
+                }, 1000);
+            }
+        } else {
+            clearTimeout(failureTimer);
+            failureTimer = null;
+        }
+    }
+
+    // 全局函数定义
+    window.restartGame = function() {
+        isGameSuccess = false;
+        // 停止游戏循环
+        if (animationFrameId) {
+            cancelAnimationFrame(animationFrameId);
+            animationFrameId = null;
+        }
+        
+        // 重置所有状态
+        balls = [];
+        score = 0;
+        isGameOver = false;
+        canCreateNewBall = true;
+        isTouching = false;
+        currentBall = new Ball(canvas);
+        physics = new PhysicsSystem(canvas); // 重置物理系统
+        spatialGrid = new Map();
+        
+        // 清除画布
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // 重置UI元素
+        document.getElementById('gameOver').style.display = 'none';
+        scoreSystem.reset();
+        energyBar.update(0);
+        
+        // 重置计时器
+        clearTimeout(failureTimer);
+        failureTimer = null;
+        
+        // 重置事件监听
+        canvas.removeEventListener('touchmove', handleTouchMove);
+        canvas.removeEventListener('mousemove', handleMouseMove);
+        canvas.addEventListener('touchmove', handleTouchMove);
+        canvas.addEventListener('mousemove', handleMouseMove);
+        
+        // 重启游戏循环
+        resize();
+        gameLoop();
+    };
+
+    function getCanvasPosition(clientX, clientY) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        const pos = {
+            x: (clientX - rect.left) * scaleX,
+            y: (clientY - rect.top) * scaleY
+        };
+        console.log('画布尺寸:', canvas.width, canvas.height);
+        console.log('触摸位置:', pos.x, pos.y);
+        console.log('气球位置:', currentBall.x, currentBall.y);
+        return pos;
+    }
+
+    window.showGameResult = function(isSuccess) {
+        const resultDiv = document.getElementById('gameOver');
+        resultDiv.innerHTML = `
+            <h2>游戏${isSuccess ? '成功' : '失败'}！</h2>
+            <p>最终得分: <span id="finalScore">${score}</span></p>
+            <button onclick="restartGame()">重新开始</button>
+        `;
+        resultDiv.style.display = 'block';
+    };
+
+    // 事件处理函数
+    const handleTouchMove = (e) => {
+        if (!isTouching || currentBall.isMoving) return;
+        const pos = getCanvasPosition(e.touches[0].clientX, e.touches[0].clientY);
+        currentBall.x = pos.x;
+        currentBall.constrainPosition();
+    };
+
+    // 在控制台查看气球状态
+    console.log('当前气球:', {
+        x: currentBall.x,
+        y: currentBall.y,
+        isMoving: currentBall.isMoving,
+        isIdle: currentBall.isIdle,
+        level: currentBall.sizeLevel
+    });
+
+    console.log('画布尺寸:', canvas.width, canvas.height);
+    console.log('当前气球位置:', currentBall.x, currentBall.y);
+    </script>
+</body>
+</html> 
