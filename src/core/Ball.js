@@ -42,8 +42,11 @@ export class Ball {
 
     update() {
         if (this.isMoving) {
+            console.log(`Ball[${this.sizeLevel}] 更新前: y=${this.y.toFixed(2)} speedY=${this.speedY.toFixed(2)}`);
             this.speedY -= 0.5;
             this.y += this.speedY;
+            this.speedY *= 0.98;
+            console.log(`更新后: y=${this.y.toFixed(2)} speedY=${this.speedY.toFixed(2)}`);
             
             if (Math.abs(this.speedY) < 0.1) {
                 this.isMoving = false;
@@ -52,7 +55,7 @@ export class Ball {
             
             if (this.y < this.radius) {
                 this.y = this.radius;
-                this.isMoving = false;
+                this.speedY = Math.abs(this.speedY) * 0.6;
             }
         } else if (this.isIdle) {
             // 待机时保持底部位置

@@ -96,6 +96,8 @@ export class PhysicsSystem {
     update(balls) {
         balls.forEach(ball => {
             if (ball.isMoving) {
+                console.log(`更新气球[${ball.sizeLevel}] speedY: ${ball.speedY.toFixed(2)}`); // 新增日志
+                ball.speedY *= 0.95;
                 ball.update();
             }
         });
